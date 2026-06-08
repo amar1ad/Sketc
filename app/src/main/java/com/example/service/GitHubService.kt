@@ -573,31 +573,52 @@ class GitHubService {
                         echo "No settings.gradle found in subdirectory, running from root"
                       fi
                       
-                      # Automatically detect the required Gradle version based on AGP version in the project
+                      # Automatically detect the required Gradle version based on AGP version in the project recursively
                       target_gradle_version="8.11.1"
                       
-                      # 1. Check if gradle-wrapper.properties exists and has a distributionUrl
-                      if [ -f gradle/wrapper/gradle-wrapper.properties ]; then
-                        wrapper_version=$(grep "distributionUrl" gradle/wrapper/gradle-wrapper.properties 2>/dev/null | sed -n 's/.*gradle-\([0-9.]*\)-\(bin\|all\)\.zip.*/\1/p' || true)
+                      # 1. Automatically detect wrapper version if any properties file exists recursively
+                      for prop in $(find . -name "gradle-wrapper.properties" 2>/dev/null); do
+                        wrapper_version=$(grep "distributionUrl" "${"$"}{prop}" 2>/dev/null | sed -n 's/.*gradle-\([0-9.]*\)-\(bin\|all\)\.zip.*/\1/p' || true)
                         if [ -n "${"$"}{wrapper_version}" ] ; then
-                          echo "Found Gradle version in wrapper properties: ${"$"}{wrapper_version}"
+                          echo "Found Gradle version in wrapper properties (${"$"}{prop}): ${"$"}{wrapper_version}"
                           target_gradle_version="${"$"}{wrapper_version}"
+                          break
                         fi
-                      fi
+                      done
                       
-                      # 2. Extract AGP version to handle newer Gradle requirements (e.g. AGP 9.1.1+ requires Gradle 9.3.1+)
+                      # 2. Extract AGP version recursively to handle newer Gradle requirements (AGP 8.12+/9.1+ requires higher Gradle version)
                       agp_version=""
-                      if [ -f build.gradle ]; then
-                        agp_version=$(grep -oE "com\.android\.(application|library)[\"']? version [\"']?[0-9.]+" build.gradle 2>/dev/null | grep -oE "[0-9.]+${"$"}" || true)
-                      fi
-                      if [ -z "${"$"}{agp_version}" ] && [ -f build.gradle.kts ]; then
-                        agp_version=$(grep -oE "com\.android\.(application|library)[\"']? version [\"']?[0-9.]+" build.gradle.kts 2>/dev/null | grep -oE "[0-9.]+${"$"}" || true)
-                        if [ -z "${"$"}{agp_version}" ] ; then
-                          agp_version=$(grep -oE "id\([\"']com\.android\.(application|library)[\"']\)\s*version\s*[\"']([0-9.]+)[\"']" build.gradle.kts 2>/dev/null | grep -oE "[0-9.]+${"$"}" || true)
+                      # Try Version catalogs first (libs.versions.toml) recursively
+                      for toml in $(find . -name "libs.versions.toml" 2>/dev/null); do
+                        version=$(grep -E "^\s*agp\s*=\s*[\"']?[0-9.]+[\"']?" "${"$"}{toml}" 2>/dev/null | grep -oE "[0-9.]+" || true)
+                        if [ -n "${"$"}{version}" ]; then
+                          echo "Found AGP version in version catalog (${"$"}{toml}): ${"$"}{version}"
+                          agp_version="${"$"}{version}"
+                          break
                         fi
-                      fi
-                      if [ -z "${"$"}{agp_version}" ] && [ -f gradle/libs.versions.toml ]; then
-                        agp_version=$(grep -iE "com\.android\.(application|library)" gradle/libs.versions.toml 2>/dev/null -A 2 | grep -oE "version\s*=\s*[\"']?[0-9.]+[\"']?" | grep -oE "[0-9.]+" || true)
+                      done
+                      
+                      # Try build.gradle and build.gradle.kts files recursively
+                      if [ -z "${"$"}{agp_version}" ] ; then
+                        for f in $(find . -name "build.gradle" -o -name "build.gradle.kts" 2>/dev/null); do
+                          # Try classpaths first
+                          version=$(grep -oE "com\.android\.tools\.build:gradle:[0-9.]+" "${"$"}{f}" 2>/dev/null | cut -d':' -f4 || true)
+                          if [ -z "${"$"}{version}" ]; then
+                            version=$(grep -oE "com\.android\.tools\.build:gradle:[0-9.]+" "${"$"}{f}" 2>/dev/null | cut -d':' -f3 || true)
+                          fi
+                          # Try plugins versions block
+                          if [ -z "${"$"}{version}" ]; then
+                            version=$(grep -oE "com\.android\.(application|library)[\"']? version [\"']?[0-9.]+" "${"$"}{f}" 2>/dev/null | grep -oE "[0-9.]+" | tail -n 1 || true)
+                          fi
+                          if [ -z "${"$"}{version}" ]; then
+                            version=$(grep -oE "id\([\"']com\.android\.(application|library)[\"']\)\s*version\s*[\"']([0-9.]+)[\"']" "${"$"}{f}" 2>/dev/null | grep -oE "[0-9.]+" | tail -n 1 || true)
+                          fi
+                          if [ -n "${"$"}{version}" ]; then
+                            echo "Found AGP version in build file (${"$"}{f}): ${"$"}{version}"
+                            agp_version="${"$"}{version}"
+                            break
+                          fi
+                        done
                       fi
                       
                       if [ -n "${"$"}{agp_version}" ] ; then
