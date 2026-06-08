@@ -688,6 +688,79 @@ class GitHubService {
                         gradle wrapper --gradle-version "${"$"}{target_gradle_version}"
                       fi
                       
+                      # Deduplicate XML resource files to prevent duplicate resource errors
+                      echo "Running Python-based resource deduplicator..."
+                      python3 -c "
+import os
+import xml.etree.ElementTree as ET
+
+res_values_dirs = []
+for root, dirs, files in os.walk('.'):
+    normalized_root = root.replace('\\\\', '/')
+    if 'res/values' in normalized_root:
+        res_values_dirs.append(root)
+
+for res_dir in res_values_dirs:
+    print(f'Cleaning duplicates in: {res_dir}')
+    priorities = {
+        'color': 'colors.xml',
+        'string': 'strings.xml',
+        'style': 'themes.xml',
+        'dimen': 'dimens.xml'
+    }
+    
+    files_data = {}
+    if os.path.exists(res_dir):
+        xml_files = [f for f in os.listdir(res_dir) if f.endswith('.xml')]
+    else:
+        xml_files = []
+        
+    for f in xml_files:
+        path = os.path.join(res_dir, f)
+        try:
+            tree = ET.parse(path)
+            files_data[f] = (tree, tree.getroot())
+        except Exception as e:
+            print(f'Error parsing {f}: {e}')
+            
+    seen = {}
+    
+    # Pass 1: Register prioritized items
+    for f, (tree, root_elem) in files_data.items():
+        for child in list(root_elem):
+            name = child.attrib.get('name')
+            if not name:
+                continue
+            tag = child.tag
+            priority_file = priorities.get(tag)
+            if priority_file == f:
+                seen[(tag, name)] = f
+                
+    # Pass 2: Remove duplicates of registered prioritize items and others
+    for f, (tree, root_elem) in list(files_data.items()):
+        modified = False
+        for child in list(root_elem):
+            name = child.attrib.get('name')
+            if not name:
+                continue
+            tag = child.tag
+            key = (tag, name)
+            
+            if key in seen:
+                if seen[key] != f:
+                    print(f'Removing duplicate {tag} \"{name}\" from {f} (already exists in {seen[key]})')
+                    root_elem.remove(child)
+                    modified = True
+            else:
+                seen[key] = f
+                
+        if modified:
+            try:
+                tree.write(os.path.join(res_dir, f), encoding='utf-8', xml_declaration=True)
+            except Exception as e:
+                print(f'Failed to write {f}: {e}')
+" || true
+                      
                       chmod +x gradlew || true
                       ./gradlew assembleDebug
                       
