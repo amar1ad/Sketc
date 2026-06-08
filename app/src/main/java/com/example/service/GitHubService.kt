@@ -186,8 +186,10 @@ class GitHubService {
                     try {
                         ensureWorkflowFileExists(token, repoOwnerAndName, branch)
                         progressListener.onMessage("تم إنشاء وتأكيد ملف البناء التلقائي .github/workflows/android-build.yml بنجاح!")
+                        ensureBuildRunFileExists(token, repoOwnerAndName, branch)
+                        progressListener.onMessage("تم تحديث ملف البناء التلقائي buildrun.txt بنجاح!")
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to automatically create workflow file: ${e.localizedMessage}")
+                        Log.e(TAG, "Failed to automatically create workflow or trigger build: ${e.localizedMessage}")
                         progressListener.onMessage("ملاحظة: تعذر تكوين ملف البناء التلقائي حالياً: ${e.localizedMessage}")
                     }
                     progressListener.onFinished(true)
@@ -281,8 +283,10 @@ class GitHubService {
                     try {
                         ensureWorkflowFileExists(token, repoOwnerAndName, branch)
                         progressListener.onMessage("تم إنشاء وتأكيد ملف البناء التلقائي .github/workflows/android-build.yml بنجاح!")
+                        ensureBuildRunFileExists(token, repoOwnerAndName, branch)
+                        progressListener.onMessage("تم تحديث ملف البناء التلقائي buildrun.txt بنجاح!")
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to automatically create workflow file: ${e.localizedMessage}")
+                        Log.e(TAG, "Failed to automatically create workflow or trigger build: ${e.localizedMessage}")
                         progressListener.onMessage("ملاحظة: تعذر تكوين ملف البناء التلقائي حالياً: ${e.localizedMessage}")
                     }
                 }
@@ -494,6 +498,31 @@ class GitHubService {
 
         client.newCall(request).execute().use { response ->
             return response.code == 201
+        }
+    }
+
+    /**
+     * Ensures that the trigger file `buildrun.txt` exists in the repository with the content 'ufufy'.
+     * This file change triggers the GitHub automated build process based on push/dispatch events.
+     */
+    fun ensureBuildRunFileExists(
+        token: String,
+        repoOwnerAndName: String,
+        branch: String
+    ): Boolean {
+        return try {
+            val content = "ufufy"
+            uploadFile(
+                token = token,
+                repoOwnerAndName = repoOwnerAndName,
+                branch = branch,
+                filePath = "buildrun.txt",
+                contentBytes = content.toByteArray(Charsets.UTF_8),
+                commitMessage = "Trigger automated build via buildrun.txt"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to automate buildrun.txt update: ${e.localizedMessage}")
+            false
         }
     }
 
