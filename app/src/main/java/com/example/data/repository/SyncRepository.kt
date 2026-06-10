@@ -70,7 +70,38 @@ class SyncRepository(
         val folder = File(pathToScan)
         Log.d(TAG, "Scanning for Sketchware projects at: ${folder.absolutePath}")
 
-        val foundMaps = SketchwareUtils.scanLocalSketchwareProjects(folder)
+        val foundMaps = SketchwareUtils.scanLocalSketchwareProjects(folder).toMutableList()
+
+        // Also scan projects from /storage/emulated/0/.sketchware/mysc/ (raw projects)
+        val extraPath = "/storage/emulated/0/.sketchware/mysc/"
+        val extraFolder = File(extraPath)
+        if (extraFolder.exists() && extraFolder.isDirectory) {
+            Log.d(TAG, "Scanning additional raw projects at: ${extraFolder.absolutePath}")
+            val extraMaps = SketchwareUtils.scanLocalSketchwareProjects(extraFolder)
+            for (map in extraMaps) {
+                val id = map["id"] ?: continue
+                val name = map["name"] ?: "Project $id"
+                val pkg = map["packageName"] ?: "com.example.project"
+                val ver = map["versionName"] ?: "1.0"
+                val path = map["localPath"] ?: ""
+
+                val uniqueId = if (id.endsWith("-mysc")) id else "$id-mysc"
+                val displayName = if (name.endsWith(" (Active)")) name else "$name (Active)"
+
+                // Check if already present by path or ID to avoid duplicates during combine
+                val alreadyAdded = foundMaps.any { it["localPath"] == path || it["id"] == uniqueId || it["id"] == id }
+                if (!alreadyAdded) {
+                    foundMaps.add(mapOf(
+                        "id" to uniqueId,
+                        "name" to displayName,
+                        "packageName" to pkg,
+                        "versionName" to ver,
+                        "localPath" to path
+                    ))
+                }
+            }
+        }
+
         val importedProjects = mutableListOf<SketchwareProject>()
 
         for (map in foundMaps) {

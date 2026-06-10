@@ -590,8 +590,8 @@ fun ProjectsTabContent(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "المسار الافتراضي للمحاكي/الهاتف هو عادة:\n/storage/emulated/0/.sketchware/data",
-                        fontSize = 10.sp,
+                        text = "المسار الافتراضي للنسخ الاحتياطية هو: /storage/emulated/0/sketchware/export_src/\nويتم الآن جلب المشاريع النشطة والمفتوحة تلقائياً من المسار:\n/storage/emulated/0/.sketchware/mysc/",
+                        fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
