@@ -128,8 +128,42 @@ tasks.register<Copy>("copyApkToBuildOutputs") {
   into(rootProject.file(".build-outputs"))
 }
 
+tasks.register("checkApk") {
+  val buildDir = layout.buildDirectory
+  val targetDirObj = project.file("../.build-outputs")
+  doLast {
+    val apkDir = buildDir.dir("outputs/apk/debug").get().asFile
+    println("Checking APK in: ${apkDir.absolutePath}")
+    if (apkDir.exists()) {
+      val files = apkDir.listFiles()
+      if (files != null) {
+        for (f in files) {
+          println("Found build file: ${f.name} (${f.length()} bytes)")
+        }
+      }
+    } else {
+      println("APK directory does not exist")
+    }
+    
+    println("Checking target Dir in: ${targetDirObj.absolutePath}")
+    if (targetDirObj.exists()) {
+      val files = targetDirObj.listFiles()
+      if (files != null) {
+        for (f in files) {
+          println("Found target file: ${f.name} (${f.length()} bytes)")
+        }
+      }
+    } else {
+      println("Target directory does not exist")
+    }
+  }
+}
+
+
+
 afterEvaluate {
   tasks.findByName("assembleDebug")?.finalizedBy("copyApkToBuildOutputs")
 }
+
 
 

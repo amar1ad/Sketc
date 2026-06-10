@@ -16,6 +16,5 @@
 local.properties
 .env
 debug.keystore
-.build-outputs/
-*.apk
-*.aab
+# Allow tracking of build outputs and apks
+
