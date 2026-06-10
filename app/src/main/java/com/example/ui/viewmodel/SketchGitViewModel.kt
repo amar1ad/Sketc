@@ -97,12 +97,11 @@ class SketchGitViewModel(application: Application) : AndroidViewModel(applicatio
             initialValue = emptyList()
         )
 
-        // Set default scan path to export_src according to user instructions
-        val defaultPath = "/storage/emulated/0/sketchware/export_src/"
+        // Set default scan path to /storage/emulated/0/.sketchware/mysc/ according to user instructions
+        val defaultPath = "/storage/emulated/0/.sketchware/mysc/"
         _scanPath.value = defaultPath
 
-        // Initial scan of default folder to discover project files (if access is permitted)
-        scanProjects()
+        // We do NOT call scanProjects() automatically on startup to guarantee 0% lag and complete user control.
 
         // Sync conflicts dynamically on projects list changed
         viewModelScope.launch {
@@ -115,21 +114,87 @@ class SketchGitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    // Selective Mysc Scan & Import States
+    private val _availableMyscProjects = MutableStateFlow<List<Map<String, String>>>(emptyList())
+    val availableMyscProjects: StateFlow<List<Map<String, String>>> = _availableMyscProjects.asStateFlow()
+
+    private val _isScanningMysc = MutableStateFlow(false)
+    val isScanningMysc: StateFlow<Boolean> = _isScanningMysc.asStateFlow()
+
+    private val _myscScanError = MutableStateFlow<String?>(null)
+    val myscScanError: StateFlow<String?> = _myscScanError.asStateFlow()
+
+    private val _showMyscSelectorDialog = MutableStateFlow(false)
+    val showMyscSelectorDialog: StateFlow<Boolean> = _showMyscSelectorDialog.asStateFlow()
+
+    fun dismissMyscSelector() {
+        _showMyscSelectorDialog.value = false
+    }
+
+    fun scanAvailableMyscProjects() {
+        viewModelScope.launch {
+            _isScanningMysc.value = true
+            _myscScanError.value = null
+            _showMyscSelectorDialog.value = true
+            try {
+                val results = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val myscDir = File(_scanPath.value)
+                    if (myscDir.exists() && myscDir.isDirectory) {
+                        com.example.service.SketchwareUtils.scanLocalSketchwareProjects(myscDir)
+                    } else {
+                        emptyList<Map<String, String>>()
+                    }
+                }
+                _availableMyscProjects.value = results
+                if (results.isEmpty()) {
+                    _myscScanError.value = "لم يتم العثور على مشاريع في المسار: ${_scanPath.value}\nيرجى التحقق من وجود المجلد وصلاحية الوصول لكافة الملفات."
+                }
+            } catch (e: Exception) {
+                _myscScanError.value = e.localizedMessage ?: "حدث عطل غير متوقع أثناء فحص مجلد mysc"
+            } finally {
+                _isScanningMysc.value = false
+            }
+        }
+    }
+
+    fun importSelectedMyscProjects(selectedList: List<Map<String, String>>) {
+        viewModelScope.launch {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                for (map in selectedList) {
+                    val id = map["id"] ?: continue
+                    val name = map["name"] ?: "Project $id"
+                    val pkg = map["packageName"] ?: "com.example.project"
+                    val ver = map["versionName"] ?: "1.0"
+                    val path = map["localPath"] ?: ""
+
+                    val uniqueId = if (id.endsWith("-mysc")) id else "$id-mysc"
+                    val displayName = if (name.endsWith(" (Active)")) name else "$name (Active)"
+
+                    val entity = SketchwareProject(
+                        id = uniqueId,
+                        name = displayName,
+                        packageName = pkg,
+                        versionName = ver,
+                        localPath = path,
+                        lastSyncStatus = "NEVER"
+                    )
+                    repository.insertProject(entity)
+                }
+            }
+            _showMyscSelectorDialog.value = false
+        }
+    }
+
     fun updateScanPath(path: String) {
         _scanPath.value = path
     }
 
     /**
      * Triggers directory scanning to automatically populate the Sketchware project list.
+     * Redirected to the selective project selector to prevent lagging and respect user intent.
      */
     fun scanProjects() {
-        viewModelScope.launch {
-            try {
-                repository.scanAndImportSketchwareProjects(_scanPath.value)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
+        scanAvailableMyscProjects()
     }
 
     /**

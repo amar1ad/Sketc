@@ -8,6 +8,7 @@ import android.provider.Settings
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
@@ -72,6 +73,11 @@ fun DashboardScreen(
 
     val projectConflicts by viewModel.projectConflicts.collectAsStateWithLifecycle()
     val githubBuildState by viewModel.githubBuildState.collectAsStateWithLifecycle()
+
+    val showMyscSelector by viewModel.showMyscSelectorDialog.collectAsStateWithLifecycle()
+    val availableMyscProj by viewModel.availableMyscProjects.collectAsStateWithLifecycle()
+    val isScanningMysc by viewModel.isScanningMysc.collectAsStateWithLifecycle()
+    val myscScanError by viewModel.myscScanError.collectAsStateWithLifecycle()
 
     var activeTab by remember { mutableStateOf(0) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -428,6 +434,19 @@ fun DashboardScreen(
             )
         }
 
+        // Selective Sketchware Project Importer Dialog
+        if (showMyscSelector) {
+            MyscProjectSelectorDialog(
+                projects = availableMyscProj,
+                isLoading = isScanningMysc,
+                scanError = myscScanError,
+                onDismiss = { viewModel.dismissMyscSelector() },
+                onImportSelected = { selected ->
+                    viewModel.importSelectedMyscProjects(selected)
+                }
+            )
+        }
+
         // Active Sync Overlay Dialog modal
         when (val state = syncState) {
             is SyncProgressState.Idle -> { /* Nothing to show */ }
@@ -590,7 +609,7 @@ fun ProjectsTabContent(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "المسار الافتراضي للنسخ الاحتياطية هو: /storage/emulated/0/sketchware/export_src/\nويتم الآن جلب المشاريع النشطة والمفتوحة تلقائياً من المسار:\n/storage/emulated/0/.sketchware/mysc/",
+                        text = "المسار الافتراضي لمشاريع سكيتشوير النشطة هو: /storage/emulated/0/.sketchware/mysc/\nاضغط على أيقونة الفحص (العدسة) بالأعلى لاختيار واستيراد المشاريع التي تفضل مزامنتها بشكل محدد، وذلك لتفادي أي بطء لكبر حجم المجلد.",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1473,6 +1492,280 @@ fun LogsTabContent(
             }
         }
     }
+}
+
+// ========================== SELECT RAW MYSC SKETCHWARE PROJECT DIALOG ==========================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MyscProjectSelectorDialog(
+    projects: List<Map<String, String>>,
+    isLoading: Boolean,
+    scanError: String?,
+    onDismiss: () -> Unit,
+    onImportSelected: (List<Map<String, String>>) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+
+    val filteredProjects = remember(projects, searchQuery) {
+        if (searchQuery.isBlank()) {
+            projects
+        } else {
+            projects.filter {
+                val name = it["name"] ?: ""
+                val id = it["id"] ?: ""
+                val pkg = it["packageName"] ?: ""
+                name.contains(searchQuery, ignoreCase = true) ||
+                        id.contains(searchQuery, ignoreCase = true) ||
+                        pkg.contains(searchQuery, ignoreCase = true)
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Folder,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "جلب المشاريع النشطة",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "المسار الحالي للفحص:\n/storage/emulated/0/.sketchware/mysc/",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.secondary,
+                    lineHeight = 16.sp
+                )
+
+                if (isLoading) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(40.dp))
+                        Text(
+                            text = "جاري قراءة ملفات المشاريع لكبر الحجم...",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else if (scanError != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = scanError,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    // Search Bar
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("بحث عن اسم المشروع أو المعرف...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        )
+                    )
+
+                    if (filteredProjects.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (projects.isEmpty()) "لم يتم العثور على أي مشاريع في مجلد mysc." else "لا مخرجات تطابق البحث المكتوب.",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        // Select All / Deselect All checkbox row
+                        val allFilteredSelected = filteredProjects.isNotEmpty() && filteredProjects.all { selectedIds.contains(it["id"]) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (allFilteredSelected) {
+                                        selectedIds = selectedIds - filteredProjects.mapNotNull { it["id"] }.toSet()
+                                    } else {
+                                        selectedIds = selectedIds + filteredProjects.mapNotNull { it["id"] }.toSet()
+                                    }
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = allFilteredSelected,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        selectedIds = selectedIds + filteredProjects.mapNotNull { it["id"] }.toSet()
+                                    } else {
+                                        selectedIds = selectedIds - filteredProjects.mapNotNull { it["id"] }.toSet()
+                                    }
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "تحديد الكل / إلغاء تحديد الكل",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Project Items List
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(filteredProjects) { project ->
+                                val id = project["id"] ?: ""
+                                val name = project["name"] ?: "Project $id"
+                                val pkg = project["packageName"] ?: "com.example"
+                                val isSelected = selectedIds.contains(id)
+
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            selectedIds = if (isSelected) {
+                                                selectedIds - id
+                                            } else {
+                                                selectedIds + id
+                                            }
+                                        },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isSelected) {
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                        }
+                                    ),
+                                    border = BorderStroke(
+                                        width = 1.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(
+                                            checked = isSelected,
+                                            onCheckedChange = { checked ->
+                                                selectedIds = if (checked) {
+                                                    selectedIds + id
+                                                } else {
+                                                    selectedIds - id
+                                                }
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = name,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "الحزمة: $pkg",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f), shape = RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(
+                                                text = "ID: $id",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val toImport = projects.filter { selectedIds.contains(it["id"]) }
+                    onImportSelected(toImport)
+                },
+                enabled = selectedIds.isNotEmpty() && !isLoading,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text("استيراد المشاريع المحددة (${selectedIds.size})")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إلغاء")
+            }
+        }
+    )
 }
 
 // ========================== ADD PROJECT DIALOG ==========================
