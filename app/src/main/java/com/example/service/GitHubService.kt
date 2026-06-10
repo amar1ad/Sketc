@@ -623,7 +623,7 @@ class GitHubService {
                   - name: Set up JDK
                     uses: actions/setup-java@v4
                     with:
-                      java-version: ${{"$"}}{{ steps.java_detect.outputs.java_version }}
+                      java-version: ${"$"}{{ steps.java_detect.outputs.java_version }}
                       distribution: 'temurin'
                   - name: Setup Gradle
                     uses: gradle/actions/setup-gradle@v4
